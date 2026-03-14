@@ -25,8 +25,10 @@ impl Quadtree {
         dt: f32,
         theta: f32,
     ) -> Vec3 {
+        // compute gravity * deltatime once per frame
+        let k = g * dt;
         self.root
-            .get_total_accel(entity, transform, body, g, dt, theta)
+            .get_total_accel(entity, transform, body, k, theta)
     }
     pub fn draw_tree(&self, mut gizmos: Gizmos) {
         fn draw_node(node: &TreeNode, gizmos: &mut Gizmos) {
@@ -114,28 +116,6 @@ impl TreeNode {
                 self.ne.insert_or_divide(entity, transform, body);
             }
         }
-
-        /*
-               if self.nw.quad.contains(position) {
-                   self.nw.insert_or_divide(entity, transform, body);
-               } else if self.ne.quad.contains(position) {
-                   self.ne.insert_or_divide(entity, transform, body);
-               } else if self.sw.quad.contains(position) {
-                   self.sw.insert_or_divide(entity, transform, body);
-               } else if self.se.quad.contains(position) {
-                   self.se.insert_or_divide(entity, transform, body);
-               } else {
-                   eprint!(
-                       "\nPosition not found in any quads!: {:?}.\nTree node: \n{:?} \nQuads: \nnw: {:?} \nne: {:?} \nsw: {:?} \nse: {:?}",
-                       transform.translation,
-                       &self.quad,
-                       &self.nw.quad,
-                       &self.ne.quad,
-                       &self.sw.quad,
-                       &self.se.quad,
-                   )
-               }
-        */
     }
 
     fn get_total_accel(
@@ -143,16 +123,15 @@ impl TreeNode {
         entity: Entity,
         transform: Transform,
         body: Body,
-        g: f32,
-        dt: f32,
+        k: f32,
         theta: f32,
     ) -> Vec3 {
         let mut cum_accel = Vec3::ZERO;
 
-        cum_accel += get_accel(&self.nw, entity, transform, body, g, dt, theta);
-        cum_accel += get_accel(&self.ne, entity, transform, body, g, dt, theta);
-        cum_accel += get_accel(&self.sw, entity, transform, body, g, dt, theta);
-        cum_accel += get_accel(&self.se, entity, transform, body, g, dt, theta);
+        cum_accel += get_accel(&self.nw, entity, transform, body, k, theta);
+        cum_accel += get_accel(&self.ne, entity, transform, body, k, theta);
+        cum_accel += get_accel(&self.sw, entity, transform, body, k, theta);
+        cum_accel += get_accel(&self.se, entity, transform, body, k, theta);
 
         cum_accel
     }
@@ -163,8 +142,7 @@ fn get_accel(
     entity: Entity,
     transform: Transform,
     body: Body,
-    g: f32,
-    dt: f32,
+    k: f32,
     theta: f32,
 ) -> Vec3 {
     match &subquad.node {
@@ -173,6 +151,7 @@ fn get_accel(
             match subquad.entity {
                 // With an occupant
                 Some(tuple) => {
+                    // But if the body is itself, no force should be exerted
                     if tuple.0.index() == entity.index() {
                         return Vec3::ZERO;
                     } else {
@@ -180,8 +159,7 @@ fn get_accel(
                             tuple.2.mass,
                             transform.translation,
                             tuple.1.translation,
-                            dt,
-                            g,
+                            k
                         );
                     }
                 }
@@ -200,21 +178,25 @@ fn get_accel(
             let d = transform.translation.distance(next_node.nw.pos_mass);
 
             if s / d < theta {
-                return calc_accel(subquad.mass, transform.translation, subquad.pos_mass, dt, g);
+                return calc_accel(subquad.mass, transform.translation, subquad.pos_mass, k);
             } else {
                 // node is too close to be treated as one. DIG DEEPER!!
-                next_node.get_total_accel(entity, transform, body, g, dt, theta)
+                next_node.get_total_accel(entity, transform, body, k, theta)
             }
         }
     }
 }
 
-fn calc_accel(m2: f32, t1: Vec3, t2: Vec3, dt: f32, g: f32) -> Vec3 {
+fn calc_accel(m2: f32, t1: Vec3, t2: Vec3, k: f32) -> Vec3 {
     let r = t2 - t1;
 
-    let mag = r.length();
-    g * (m2 / mag) * r.normalize() * dt
+    let dist_sq = r.length_squared();
+    let inv_dist = dist_sq.sqrt().recip();
+    let inv_dist2 = inv_dist * inv_dist;
+
+    k * m2 * r * inv_dist2
 }
+
 
 struct Subquad {
     quad: Quad,
@@ -354,10 +336,6 @@ impl Quad {
     fn contains(&self, pos: Vec2) -> bool {
         let hl = self.size / 2.0;
         let eps = hl * 0.0001;
-        /*         (pos.x >= self.center.x - hl - eps)
-        && (pos.x <= self.center.x + hl + eps)
-        && (pos.y >= self.center.y - hl - eps)
-        && (pos.y <= self.center.y + hl + eps) */
 
         (self.center.x - pos.x).abs() - eps <= hl && (self.center.y - pos.y).abs() - eps <= hl
     }

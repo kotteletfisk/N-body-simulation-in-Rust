@@ -1,5 +1,8 @@
 pub(crate) mod bhtree;
 pub(crate) mod tests;
+pub(crate) mod bodies;
+
+use bodies::Body;
 use bevy::{ecs::entity::EntityIndex, prelude::*};
 use bevy_egui::{EguiPrimaryContextPass, EguiContexts, EguiPlugin, egui};
 use bhtree::{Quad, Quadtree};
@@ -51,15 +54,8 @@ impl Default for SimulationSettings {
 #[derive(Component)]
 pub struct Velocity(Vec3);
 
-#[derive(Component, Clone, Copy)]
-pub struct Body {
-    mass: f32,
-    radius: f32,
-    hue: f32,
-}
-
 #[derive(Message)]
-struct ResetEvent;
+struct ResetMessage;
 
 fn main() {
     App::new()
@@ -67,8 +63,7 @@ fn main() {
         .insert_resource(SimulationSettings::default())
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
-        .add_message::<ResetEvent>()
-        // .add_event::<ResetEvent>()
+        .add_message::<ResetMessage>()
         .add_systems(EguiPrimaryContextPass, ui_window)
         .add_systems(Startup, (spawn_camera, add_bodies))
         .add_systems(Update, (collision, reset_handler, update))
@@ -78,7 +73,7 @@ fn main() {
 fn ui_window(
     mut contexts: EguiContexts,
     mut settings: ResMut<SimulationSettings>,
-    mut reset_writer: MessageWriter<ResetEvent>,
+    mut reset_writer: MessageWriter<ResetMessage>,
 ) -> Result {
     egui::Window::new("Settings").show(contexts.ctx_mut().unwrap(), |ui| {
         ui.add(egui::Slider::new(&mut settings.g, 0.0..=10.0).text("Gravity constant"));
@@ -101,7 +96,7 @@ fn ui_window(
                 .text("Initial Velocity (Only Donut)"),
         );
         if ui.button("Reset").clicked() {
-            reset_writer.write(ResetEvent);
+            reset_writer.write(ResetMessage);
         }
     });
     Ok(())
@@ -109,7 +104,7 @@ fn ui_window(
 
 fn reset_handler(
     query: Query<Entity, With<Body>>,
-    reset_event: MessageReader<ResetEvent>,
+    reset_event: MessageReader<ResetMessage>,
     mut commands: Commands,
     materials: ResMut<Assets<ColorMaterial>>,
     meshes: ResMut<Assets<Mesh>>,
