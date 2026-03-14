@@ -29,47 +29,47 @@ pub fn collision(
 
     // We loop through all the items in the simulation
     for i in 0..items.len() {
-    // We need to split the items into two parts
-    // Because of rust borrow checker rules, Body A and Body B cannot be borrowed with the same mutable reference
-    // So we split the items into two parts, left and right
-    // Left part gets the current item index plus the next item and the right part gets the rest of the items
+        // We need to split the items into two parts
+        // Because of rust borrow checker rules, Body A and Body B cannot be borrowed with the same mutable reference
+        // So we split the items into two parts, left and right
+        // Left part gets the current item index plus the next item and the right part gets the rest of the items
 
-    let split = i + 1;
-    let (left, right) = items.split_at_mut(split);
-    let (_entity_a, transform_a, velocity_a, body_a) = &mut left[i]; 
+        let split = i + 1;
+        let (left, right) = items.split_at_mut(split);
+        let (_entity_a, transform_a, velocity_a, body_a) = &mut left[i]; 
 
-    // We loop throught the right part of the items split
-    for li in 0..right.len() {
-        let (_entity_b, transform_b, velocity_b, body_b) = &mut right[li];
+        // We loop throught the right part of the items split
+        for li in 0..right.len() {
+            let (_entity_b, transform_b, velocity_b, body_b) = &mut right[li];
 
-        // We get the positions of the two bodies
-        let position_a = transform_a.translation;
-        let position_b = transform_b.translation;
+            // We get the 2d positions of the two bodies
+            let position_a = Vec2::new(transform_a.translation.x, transform_a.translation.y);
+            let position_b = Vec2::new(transform_b.translation.x, transform_b.translation.y);
 
-        // We get the distance between the two bodies
-        let distance = position_a.distance(position_b);
+            // We get the distance between the two bodies
+            let distance = position_a.distance(position_b);
 
-        let min_distance = body_a.radius + body_b.radius; // If the sum of radius is bigger than the distance, then they are colliding
+            let min_distance = body_a.radius + body_b.radius; // If the sum of radius is bigger than the distance, then they are colliding
 
-            // Check if the distance is less than the minimum distance
-            if distance < min_distance {
-                let normal = (position_b - position_a).normalize();
-                let relative_velocity = velocity_b.0 - velocity_a.0;
-                let velocity_along_normal = relative_velocity.dot(normal);
+                // Check if the distance is less than the minimum distance
+                if distance < min_distance {
+                    let normal = (position_b - position_a).normalize();
+                    let relative_velocity = velocity_b.0 - velocity_a.0;
+                    let velocity_along_normal = relative_velocity.dot(normal);
 
-                if velocity_along_normal > 0.0 {
-                    continue;
+                    if velocity_along_normal > 0.0 {
+                        continue;
+                    }
+
+                    let impulse_magnitude = -(1.0 + elasticity) * velocity_along_normal
+                        / (1.0 / body_a.mass + 1.0 / body_b.mass);
+
+                    let impulse = impulse_magnitude * normal;
+
+                    velocity_a.0 -= impulse / body_a.mass;
+                    velocity_b.0 += impulse / body_b.mass;
                 }
-
-                let impulse_magnitude = -(1.0 + elasticity) * velocity_along_normal
-                    / (1.0 / body_a.mass + 1.0 / body_b.mass);
-
-                let impulse = impulse_magnitude * normal;
-
-                velocity_a.0 -= impulse / body_a.mass;
-                velocity_b.0 += impulse / body_b.mass;
             }
-        }
     }
 }
 

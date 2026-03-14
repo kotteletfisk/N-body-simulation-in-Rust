@@ -12,23 +12,23 @@ impl Quadtree {
         }
     }
 
-    pub fn insert(&mut self, entity: Entity, transform: Transform, body: Body) {
-        self.root.insert_into_subquad(entity, transform, body);
+    pub fn insert(&mut self, entity: Entity, pos2d: Vec2, body: Body) {
+        self.root.insert_into_subquad(entity, pos2d, body);
     }
 
     pub fn get_total_accel(
         &mut self,
         entity: Entity,
-        transform: Transform,
+        pos2d: Vec2,
         body: Body,
         g: f32,
         dt: f32,
         theta: f32,
-    ) -> Vec3 {
+    ) -> Vec2 {
         // compute gravity * deltatime once per frame
         let k = g * dt;
         self.root
-            .get_total_accel(entity, transform, body, k, theta)
+            .get_total_accel(entity, pos2d, body, k, theta)
     }
     pub fn draw_tree(&self, mut gizmos: Gizmos) {
         fn draw_node(node: &TreeNode, gizmos: &mut Gizmos) {
@@ -81,13 +81,12 @@ impl TreeNode {
         }
     }
 
-    fn insert_into_subquad(&mut self, entity: Entity, transform: Transform, body: Body) {
-        let pos = Vec2::new(transform.translation.x, transform.translation.y);
+    fn insert_into_subquad(&mut self, entity: Entity, pos: Vec2, body: Body) {
 
         if !self.quad.contains(pos) {
             eprintln!(
                 "\nPosition not found in any quads!: {:?}.\nTree node: \n{:?} \nQuads: \nnw: {:?} \nne: {:?} \nsw: {:?} \nse: {:?}",
-                transform.translation,
+                pos,
                 &self.quad,
                 &self.nw.quad,
                 &self.ne.quad,
@@ -101,19 +100,19 @@ impl TreeNode {
             // going south
             if pos.x < self.quad.center.x {
                 // going west
-                self.sw.insert_or_divide(entity, transform, body);
+                self.sw.insert_or_divide(entity, pos, body);
             } else {
                 // going east with ambiguous cases
-                self.se.insert_or_divide(entity, transform, body);
+                self.se.insert_or_divide(entity, pos, body);
             }
         } else {
             // going north
             if pos.x < self.quad.center.x {
                 // going west
-                self.nw.insert_or_divide(entity, transform, body);
+                self.nw.insert_or_divide(entity, pos, body);
             } else {
                 // going east with amb cases
-                self.ne.insert_or_divide(entity, transform, body);
+                self.ne.insert_or_divide(entity, pos, body);
             }
         }
     }
@@ -121,17 +120,17 @@ impl TreeNode {
     fn get_total_accel(
         &self,
         entity: Entity,
-        transform: Transform,
+        pos2d: Vec2,
         body: Body,
         k: f32,
         theta: f32,
-    ) -> Vec3 {
-        let mut cum_accel = Vec3::ZERO;
+    ) -> Vec2 {
+        let mut cum_accel = Vec2::ZERO;
 
-        cum_accel += get_accel(&self.nw, entity, transform, body, k, theta);
-        cum_accel += get_accel(&self.ne, entity, transform, body, k, theta);
-        cum_accel += get_accel(&self.sw, entity, transform, body, k, theta);
-        cum_accel += get_accel(&self.se, entity, transform, body, k, theta);
+        cum_accel += get_accel(&self.nw, entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.ne, entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.sw, entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.se, entity, pos2d, body, k, theta);
 
         cum_accel
     }
@@ -140,11 +139,11 @@ impl TreeNode {
 fn get_accel(
     subquad: &Box<Subquad>,
     entity: Entity,
-    transform: Transform,
+    pos2d: Vec2,
     body: Body,
     k: f32,
     theta: f32,
-) -> Vec3 {
+) -> Vec2 {
     match &subquad.node {
         None => {
             // Node is a leaf
@@ -153,19 +152,19 @@ fn get_accel(
                 Some(tuple) => {
                     // But if the body is itself, no force should be exerted
                     if tuple.0.index() == entity.index() {
-                        return Vec3::ZERO;
+                        return Vec2::ZERO;
                     } else {
                         return calc_accel(
                             tuple.2.mass,
-                            transform.translation,
-                            tuple.1.translation,
+                            pos2d,
+                            tuple.1,
                             k
                         );
                     }
                 }
                 None => {
                     // Nobody home;
-                    return Vec3::ZERO;
+                    return Vec2::ZERO;
                 }
             }
         }
@@ -175,22 +174,24 @@ fn get_accel(
             // d = distance between node center of mass and body
 
             let s = subquad.quad.size;
-            let d = transform.translation.distance(next_node.nw.pos_mass);
+            let d = pos2d.distance(next_node.nw.pos_mass);
 
             if s / d < theta {
-                return calc_accel(subquad.mass, transform.translation, subquad.pos_mass, k);
+                return calc_accel(subquad.mass, pos2d, subquad.pos_mass, k);
             } else {
                 // node is too close to be treated as one. DIG DEEPER!!
-                next_node.get_total_accel(entity, transform, body, k, theta)
+                next_node.get_total_accel(entity, pos2d, body, k, theta)
             }
         }
     }
 }
 
-fn calc_accel(m2: f32, t1: Vec3, t2: Vec3, k: f32) -> Vec3 {
+fn calc_accel(m2: f32, t1: Vec2, t2: Vec2, k: f32) -> Vec2 {
+    const EPS2: f32 = 0.01;
+
     let r = t2 - t1;
 
-    let dist_sq = r.length_squared();
+    let dist_sq = r.length_squared() + EPS2;
     let inv_dist = dist_sq.sqrt().recip();
     let inv_dist2 = inv_dist * inv_dist;
 
@@ -200,10 +201,10 @@ fn calc_accel(m2: f32, t1: Vec3, t2: Vec3, k: f32) -> Vec3 {
 
 struct Subquad {
     quad: Quad,
-    entity: Option<(Entity, Transform, Body)>,
+    entity: Option<(Entity, Vec2, Body)>,
     node: Option<TreeNode>,
     mass: f32,
-    pos_mass: Vec3,
+    pos_mass: Vec2,
 }
 
 impl Subquad {
@@ -213,15 +214,14 @@ impl Subquad {
             entity: Option::None,
             node: Option::None,
             mass: 0.0,
-            pos_mass: Vec3 {
+            pos_mass: Vec2 {
                 x: 0.0,
-                y: 0.0,
-                z: 0.0,
+                y: 0.0
             },
         }
     }
 
-    fn insert_or_divide(&mut self, entity: Entity, transform: Transform, body: Body) {
+    fn insert_or_divide(&mut self, entity: Entity, pos: Vec2, body: Body) {
         match &mut self.node {
             Some(node) => {
                 // Node Is internal. Updat center of mass and total mass, and insert into subquadrants
@@ -229,9 +229,9 @@ impl Subquad {
                 let m2 = body.mass;
                 let m = m1 + m2;
                 let x1 = self.pos_mass.x;
-                let x2 = transform.translation.x;
+                let x2 = pos.x;
                 let y1 = self.pos_mass.y;
-                let y2 = transform.translation.y;
+                let y2 = pos.y;
 
                 let x = (x1 * m1 + x2 * m2) / m;
                 let y = (y1 * m1 + y2 * m2) / m;
@@ -240,14 +240,14 @@ impl Subquad {
                 self.pos_mass.x = x;
                 self.pos_mass.y = y;
 
-                node.insert_into_subquad(entity, transform, body);
+                node.insert_into_subquad(entity, pos, body);
             }
             None => {
                 // Node is leaf. Insert if no body, or subdivide if occupied
                 match self.entity {
                     None => {
                         // No body present
-                        self.entity = Some((entity, transform, body));
+                        self.entity = Some((entity, pos, body));
                     }
                     Some(tuple) => {
                         // Node is occupied. We must dig deeper!!!1
@@ -260,9 +260,9 @@ impl Subquad {
                             let m2 = body.mass;
                             let m = m1 + m2;
                             let x1 = self.pos_mass.x;
-                            let x2 = transform.translation.x;
+                            let x2 = pos.x;
                             let y1 = self.pos_mass.y;
-                            let y2 = transform.translation.y;
+                            let y2 = pos.y;
 
                             let x = (x1 * m1 + x2 * m2) / m;
                             let y = (y1 * m1 + y2 * m2) / m;
@@ -273,16 +273,16 @@ impl Subquad {
                         } else {
                             let mut new_node = TreeNode::new(self.quad);
 
-                            new_node.insert_into_subquad(entity, transform, body);
+                            new_node.insert_into_subquad(entity, pos, body);
                             new_node.insert_into_subquad(tuple.0, tuple.1, tuple.2);
 
                             let m1 = self.mass;
                             let m2 = body.mass;
                             let m = m1 + m2;
                             let x1 = self.pos_mass.x;
-                            let x2 = transform.translation.x;
+                            let x2 = pos.x;
                             let y1 = self.pos_mass.y;
-                            let y2 = transform.translation.y;
+                            let y2 = pos.y;
 
                             let x = (x1 * m1 + x2 * m2) / m;
                             let y = (y1 * m1 + y2 * m2) / m;

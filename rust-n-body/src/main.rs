@@ -22,8 +22,8 @@ pub struct SimulationSettings {
     min_body_mass: f32,
     max_body_mass: f32,
     n_bodies: u32,
-    spawn_area: RangeInclusive<f32>,
     z: f32,
+    spawn_area: RangeInclusive<f32>,
     theta: f32,
     init_vel: f32,
     donut: bool,
@@ -40,8 +40,8 @@ impl Default for SimulationSettings {
             min_body_mass: 10.0,
             max_body_mass: 100.0,
             n_bodies: 1500,
-            spawn_area: -300.0..=300.0,
             z: 10.0,
+            spawn_area: -300.0..=300.0,
             theta: 0.5,
             init_vel: 50.0,
             donut: false,
@@ -52,7 +52,7 @@ impl Default for SimulationSettings {
 }
 
 #[derive(Component)]
-pub struct Velocity(Vec3);
+pub struct Velocity(Vec2);
 
 #[derive(Message)]
 struct ResetMessage;
@@ -92,7 +92,7 @@ fn ui_window(
         ui.add(egui::Slider::new(&mut settings.max_body_mass, 1.0..=5000.0).text("Max Body Mass"));
         ui.add(egui::Checkbox::new(&mut settings.donut, "Donut Start"));
         ui.add(
-            egui::Slider::new(&mut settings.init_vel, 0.0..=1000.0)
+            egui::Slider::new(&mut settings.init_vel, 1.0..=1000.0)
                 .text("Initial Velocity (Only Donut)"),
         );
         if ui.button("Reset").clicked() {
@@ -144,26 +144,7 @@ pub fn mass_to_hue(m: f32, min_mass: f32, max_mass: f32) -> f32 {
 
     ((m - min_mass) * new_max) / (max_mass - min_mass)
 }
-/* 
-might be useful in the futu
-fn body_collide(
-    body1: &Body,
-    body2: &Body,
-    vel1: &Velocity,
-    vel2: &Velocity,
-    imp: &Vec3,
-    dist: f32,
-) -> Vec3 {
-    // elastic colliison (its horrible)
-    let m_sum = body1.mass + body2.mass;
-    let v_diff = vel2.0 - vel1.0;
 
-    let num_a = 2.0 * body2.mass * v_diff.dot(*imp);
-    let den_a = m_sum * dist * dist;
-
-    imp * (num_a / den_a)
-}
- */
 fn add_bodies(
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -193,19 +174,19 @@ fn add_bodies(
             let y = rng.random_range(settings.spawn_area.clone());
             let rng_mag = rng.random_range(10.0..=200.0);
 
-            let dir = Vec2::new(x, y).normalize();
+            let dir = Vec2::new(x, y).normalize_or_zero();
             let rng_vec = dir * rng_mag;
 
             transform = Transform::from_xyz(rng_vec.x, rng_vec.y, settings.z);
-            let angle_vel = Vec3::from((dir.perp() * settings.init_vel, settings.z));
+            let angle_vel = Vec2::from(dir.perp() * settings.init_vel);
             velocity = Velocity(angle_vel);
         }
         else{
             let x = rng.random_range(settings.spawn_area.clone());
             let y = rng.random_range(settings.spawn_area.clone());
-
+            
             transform = Transform::from_xyz(x, y, settings.z);
-            velocity = Velocity(Vec3::ZERO);
+            velocity = Velocity(Vec2::ZERO);
         }
 
         spawn_body(
@@ -224,7 +205,7 @@ fn update(
     settings: Res<SimulationSettings>,
     gizmos: Gizmos,
 ) {
-    let mut accel_map: HashMap<EntityIndex, Vec3> = HashMap::new();
+    let mut accel_map: HashMap<EntityIndex, Vec2> = HashMap::new();
     // let mut col_map: HashMap<u32, Vec3> = HashMap::new();
 
     let positions: Vec<Vec2> = query
@@ -237,7 +218,7 @@ fn update(
     let mut tree = Quadtree::new(quad);
 
     for (entity1, body1, transform1, _velocity1) in query.iter() {
-        tree.insert(entity1, *transform1, *body1);
+        tree.insert(entity1, Vec2::new(transform1.translation.x, transform1.translation.y), *body1);
     }
 
     if settings.show_tree {
@@ -245,9 +226,10 @@ fn update(
     }
 
     for (entity1, body1, transform1, _velocity1) in query.iter_mut() {
+        let pos2d = Vec2::new(transform1.translation.x, transform1.translation.y);
         let accel = tree.get_total_accel(
             entity1,
-            *transform1,
+            pos2d,
             *body1,
             settings.g,
             settings.delta_t,
@@ -255,31 +237,6 @@ fn update(
         );
         accel_map.insert(entity1.index(), accel);
     }
-
-    /*        for (entity2, body2, transform2, velocity2) in query.iter().remaining() {
-     if entity1.index() == entity2.index() {
-         // dont consider itself
-         continue;
-     }
-
-     // Gravitational interraction
-     let m2 = body2.mass;
-
-     let r = transform2.translation - transform1.translation;
-
-    /*  // collision detection (BUGGED)
-     let dist = transform1.translation.distance(transform2.translation);
-     if dist < body1.radius + body2.radius {
-         col_map.insert(entity1.index(), body_collide(&body1, &body2, &velocity1, &velocity2, &r, dist));
-     } */
-     // let mag_sqr = r.x * r.x + r.y * r.y;
-     // let mag = mag_sqr.sqrt();
-
-     let mag = r.length();
-     let a1: Vec3 = settings.g * (m2 / (/* mag_sqrt * */mag)) * r.normalize() * settings.delta_t;
-
-     accel_cum += a1;
-     } */
 
     for (entity1, _body1, mut transform1, mut velocity) in query.iter_mut() {
         // velocity.0 += col_map.get(&entity1.index()).unwrap_or(&Vec3::ZERO);
