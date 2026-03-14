@@ -1,7 +1,7 @@
 pub(crate) mod bhtree;
 pub(crate) mod tests;
-use bevy::prelude::*;
-use bevy_egui::{EguiContextPass, EguiContexts, EguiPlugin, egui};
+use bevy::{ecs::entity::EntityIndex, prelude::*};
+use bevy_egui::{EguiPrimaryContextPass, EguiContexts, EguiPlugin, egui};
 use bhtree::{Quad, Quadtree};
 use rand::Rng;
 use std::{collections::HashMap, ops::RangeInclusive};
@@ -58,7 +58,7 @@ pub struct Body {
     hue: f32,
 }
 
-#[derive(Event)]
+#[derive(Message)]
 struct ResetEvent;
 
 fn main() {
@@ -66,11 +66,10 @@ fn main() {
         .insert_resource(ClearColor(Color::BLACK))
         .insert_resource(SimulationSettings::default())
         .add_plugins(DefaultPlugins)
-        .add_plugins(EguiPlugin {
-            enable_multipass_for_primary_context: true,
-        })
-        .add_event::<ResetEvent>()
-        .add_systems(EguiContextPass, ui_window)
+        .add_plugins(EguiPlugin::default())
+        .add_message::<ResetEvent>()
+        // .add_event::<ResetEvent>()
+        .add_systems(EguiPrimaryContextPass, ui_window)
         .add_systems(Startup, (spawn_camera, add_bodies))
         .add_systems(Update, (collision, reset_handler, update))
         .run();
@@ -79,9 +78,9 @@ fn main() {
 fn ui_window(
     mut contexts: EguiContexts,
     mut settings: ResMut<SimulationSettings>,
-    mut reset_writer: EventWriter<ResetEvent>,
-) {
-    egui::Window::new("Settings").show(contexts.ctx_mut(), |ui| {
+    mut reset_writer: MessageWriter<ResetEvent>,
+) -> Result {
+    egui::Window::new("Settings").show(contexts.ctx_mut().unwrap(), |ui| {
         ui.add(egui::Slider::new(&mut settings.g, 0.0..=10.0).text("Gravity constant"));
         ui.add(egui::Slider::new(&mut settings.delta_t, 0.00000001..=0.01).text("Delta T"));
         ui.add(egui::Slider::new(&mut settings.theta, 0.1..=1.0).text("BH Theta"));
@@ -105,11 +104,12 @@ fn ui_window(
             reset_writer.write(ResetEvent);
         }
     });
+    Ok(())
 }
 
 fn reset_handler(
     query: Query<Entity, With<Body>>,
-    reset_event: EventReader<ResetEvent>,
+    reset_event: MessageReader<ResetEvent>,
     mut commands: Commands,
     materials: ResMut<Assets<ColorMaterial>>,
     meshes: ResMut<Assets<Mesh>>,
@@ -229,7 +229,7 @@ fn update(
     settings: Res<SimulationSettings>,
     gizmos: Gizmos,
 ) {
-    let mut accel_map: HashMap<u32, Vec3> = HashMap::new();
+    let mut accel_map: HashMap<EntityIndex, Vec3> = HashMap::new();
     // let mut col_map: HashMap<u32, Vec3> = HashMap::new();
 
     let positions: Vec<Vec2> = query
