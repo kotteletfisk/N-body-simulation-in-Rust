@@ -42,16 +42,16 @@ impl Quadtree {
         fn recurse(gizmos: &mut Gizmos, node: &TreeNode) {
             draw_node(&node, gizmos);
 
-            if let Some(child) = &node.nw.node {
+            if let Some(child) = &*node.children[0].node {
                 recurse(gizmos, child);
             }
-            if let Some(child) = &node.ne.node {
+            if let Some(child) = &*node.children[1].node {
                 recurse(gizmos, child);
             }
-            if let Some(child) = &node.sw.node {
+            if let Some(child) = &*node.children[2].node {
                 recurse(gizmos, child);
             }
-            if let Some(child) = &node.se.node {
+            if let Some(child) = &*node.children[3].node {
                 recurse(gizmos, child);
             }
         }
@@ -61,10 +61,7 @@ impl Quadtree {
 
 struct TreeNode {
     quad: Quad,
-    nw: Box<Subquad>,
-    ne: Box<Subquad>,
-    sw: Box<Subquad>,
-    se: Box<Subquad>,
+    children: [Subquad; 4],
 }
 
 impl TreeNode {
@@ -73,11 +70,13 @@ impl TreeNode {
         let q = h / 2.0;
 
         TreeNode {
-            nw: Box::new(Subquad::new(quad.center.x - q, quad.center.y + q, h)),
-            ne: Box::new(Subquad::new(quad.center.x + q, quad.center.y + q, h)),
-            sw: Box::new(Subquad::new(quad.center.x - q, quad.center.y - q, h)),
-            se: Box::new(Subquad::new(quad.center.x + q, quad.center.y - q, h)),
             quad,
+            children: [
+                Subquad::new(quad.center.x - q, quad.center.y + q, h),
+                Subquad::new(quad.center.x + q, quad.center.y + q, h),
+                Subquad::new(quad.center.x - q, quad.center.y - q, h),
+                Subquad::new(quad.center.x + q, quad.center.y - q, h)
+            ]
         }
     }
 
@@ -88,10 +87,10 @@ impl TreeNode {
                 "\nPosition not found in any quads!: {:?}.\nTree node: \n{:?} \nQuads: \nnw: {:?} \nne: {:?} \nsw: {:?} \nse: {:?}",
                 pos,
                 &self.quad,
-                &self.nw.quad,
-                &self.ne.quad,
-                &self.sw.quad,
-                &self.se.quad,
+                &self.children[0].quad,
+                &self.children[1].quad,
+                &self.children[2].quad,
+                &self.children[3].quad
             );
             return;
         }
@@ -100,19 +99,19 @@ impl TreeNode {
             // going south
             if pos.x < self.quad.center.x {
                 // going west
-                self.sw.insert_or_divide(entity, pos, body);
+                self.children[2].insert_or_divide(entity, pos, body);
             } else {
                 // going east with ambiguous cases
-                self.se.insert_or_divide(entity, pos, body);
+                self.children[3].insert_or_divide(entity, pos, body);
             }
         } else {
             // going north
             if pos.x < self.quad.center.x {
                 // going west
-                self.nw.insert_or_divide(entity, pos, body);
+                self.children[0].insert_or_divide(entity, pos, body);
             } else {
                 // going east with amb cases
-                self.ne.insert_or_divide(entity, pos, body);
+                self.children[1].insert_or_divide(entity, pos, body);
             }
         }
     }
@@ -127,24 +126,24 @@ impl TreeNode {
     ) -> Vec2 {
         let mut cum_accel = Vec2::ZERO;
 
-        cum_accel += get_accel(&self.nw, entity, pos2d, body, k, theta);
-        cum_accel += get_accel(&self.ne, entity, pos2d, body, k, theta);
-        cum_accel += get_accel(&self.sw, entity, pos2d, body, k, theta);
-        cum_accel += get_accel(&self.se, entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.children[0], entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.children[1], entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.children[2], entity, pos2d, body, k, theta);
+        cum_accel += get_accel(&self.children[3], entity, pos2d, body, k, theta);
 
         cum_accel
     }
 }
 
 fn get_accel(
-    subquad: &Box<Subquad>,
+    subquad: &Subquad,
     entity: Entity,
     pos2d: Vec2,
     body: Body,
     k: f32,
     theta: f32,
 ) -> Vec2 {
-    match &subquad.node {
+    match &*subquad.node {
         None => {
             // Node is a leaf
             match subquad.entity {
@@ -174,7 +173,7 @@ fn get_accel(
             // d = distance between node center of mass and body
 
             let s = subquad.quad.size;
-            let d = pos2d.distance(next_node.nw.pos_mass);
+            let d = pos2d.distance(next_node.quad.center);
 
             if s / d < theta {
                 return calc_accel(subquad.mass, pos2d, subquad.pos_mass, k);
@@ -202,7 +201,7 @@ fn calc_accel(m2: f32, t1: Vec2, t2: Vec2, k: f32) -> Vec2 {
 struct Subquad {
     quad: Quad,
     entity: Option<(Entity, Vec2, Body)>,
-    node: Option<TreeNode>,
+    node: Box<Option<TreeNode>>,
     mass: f32,
     pos_mass: Vec2,
 }
@@ -212,7 +211,7 @@ impl Subquad {
         Subquad {
             quad: Quad::new(x, y, size),
             entity: Option::None,
-            node: Option::None,
+            node: Box::new(Option::None),
             mass: 0.0,
             pos_mass: Vec2 {
                 x: 0.0,
@@ -222,7 +221,7 @@ impl Subquad {
     }
 
     fn insert_or_divide(&mut self, entity: Entity, pos: Vec2, body: Body) {
-        match &mut self.node {
+        match &mut *self.node {
             Some(node) => {
                 // Node Is internal. Updat center of mass and total mass, and insert into subquadrants
                 let m1 = self.mass;
@@ -291,7 +290,7 @@ impl Subquad {
                             self.pos_mass.x = x;
                             self.pos_mass.y = y;
 
-                            self.node = Some(new_node);
+                            self.node = Box::new(Some(new_node));
                         }
                     }
                 }
