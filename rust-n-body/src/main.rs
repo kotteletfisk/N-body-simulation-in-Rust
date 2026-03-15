@@ -5,12 +5,12 @@ pub(crate) mod bhtree;
 pub(crate) mod bodies;
 pub(crate) mod tests;
 
-use bevy::{ecs::entity::EntityIndex, gizmos, prelude::*};
+use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bhtree::{Quad, Quadtree};
 use bodies::Body;
 use rand::Rng;
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::ops::RangeInclusive;
 
 mod collision;
 use collision::collision;
@@ -77,15 +77,24 @@ fn setup_app(mut app: App) -> App {
         .add_plugins(EguiPlugin::default())
         .add_message::<ResetMessage>()
         .add_systems(EguiPrimaryContextPass, ui_window)
-        .add_systems(Startup, (spawn_camera, add_bodies))
-        .add_systems(Update, (
-            collision,
-            reset_handler,
-            build_quadtree,
-            compute_physics.after(build_quadtree),
-            update_positions.after(compute_physics),
-            draw_tree.after(update_positions),
-        ));
+        .add_systems(
+            Startup,
+            (spawn_camera, add_bodies),
+        )
+        .add_systems(
+            Update,
+            (
+                collision,
+                reset_handler,
+                draw_bodies,
+                (
+                    build_quadtree,
+                    compute_physics,
+                    update_positions,
+                    draw_tree,
+                ).chain()
+            ),
+        );
 
     app
 }
@@ -129,8 +138,6 @@ fn reset_handler(
     query: Query<Entity, With<Body>>,
     reset_event: MessageReader<ResetMessage>,
     mut commands: Commands,
-    materials: Option<ResMut<Assets<ColorMaterial>>>,
-    meshes: Option<ResMut<Assets<Mesh>>>,
     settings: Res<SimulationSettings>,
 ) {
     if reset_event.is_empty() {
@@ -141,7 +148,8 @@ fn reset_handler(
         commands.entity(entity).despawn();
     }
 
-    add_bodies(commands, materials, meshes, settings);
+    // add_bodies(commands, materials, meshes, settings);
+    spawn_bodies_from_settings(commands, &settings);
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -168,12 +176,7 @@ pub fn mass_to_hue(m: f32, min_mass: f32, max_mass: f32) -> f32 {
     ((m - min_mass) * new_max) / (max_mass - min_mass)
 }
 
-fn add_bodies(
-    mut commands: Commands,
-    mut materials: Option<ResMut<Assets<ColorMaterial>>>,
-    mut meshes: Option<ResMut<Assets<Mesh>>>,
-    settings: Res<SimulationSettings>,
-) {
+fn spawn_bodies_from_settings(mut commands: Commands, settings: &SimulationSettings) {
     let norm_min = if settings.min_body_mass < settings.max_body_mass {
         settings.min_body_mass
     } else {
@@ -181,6 +184,9 @@ fn add_bodies(
     };
 
     let mut rng = rand::rng();
+    let mut added_bodies = Vec::<(Body, Transform, Velocity)>::with_capacity(
+        settings.n_bodies.try_into().unwrap_or(usize::MIN),
+    );
     for _ in 0..settings.n_bodies {
         let rng_mass = rng.random_range(norm_min..=settings.max_body_mass);
         let body = Body {
@@ -210,16 +216,60 @@ fn add_bodies(
             transform = Transform::from_xyz(x, y, settings.z);
             velocity = Velocity(Vec2::ZERO);
         }
-        spawn_body(
-            body,
-            transform,
-            velocity,
-            &mut commands,
-            &mut materials,
-            &mut meshes,
-        );
+
+        added_bodies.push((body, transform, velocity));
+    }
+    commands.spawn_batch(added_bodies);
+}
+
+fn add_bodies(commands: Commands, settings: Res<SimulationSettings>) {
+    spawn_bodies_from_settings(commands, &settings);
+}
+
+fn draw_bodies(
+    mut commands: Commands,
+    mut query: Query<(Entity, &Body), Added<Body>>,
+    materials: Option<ResMut<Assets<ColorMaterial>>>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
+) {
+    // Spawn rendering materials only when available (to allow testing)
+    if let (Some(mut meshes), Some(mut materials)) = (meshes, materials) {
+        for (entity, body) in query.iter_mut() {
+            commands
+                .entity(entity)
+                .insert(Mesh2d(meshes.add(Circle::new(body.radius))))
+                .insert(MeshMaterial2d(
+                    materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0))),
+                ));
+        }
     }
 }
+
+/* fn spawn_body(
+    body: Body,
+    transform: Transform,
+    velocity: Velocity,
+    commands: &mut Commands,
+    materials: &mut Option<ResMut<Assets<ColorMaterial>>>,
+    meshes: &mut Option<ResMut<Assets<Mesh>>>,
+) {
+    // Spawn rendering materials only when available (to allow testing)
+    if let Some(meshes) = meshes {
+        if let Some(materials) = materials {
+            commands.spawn((
+                Mesh2d(meshes.add(Circle::new(body.radius))),
+                MeshMaterial2d(
+                    materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0))),
+                ),
+                body,
+                transform,
+                velocity,
+            ));
+        }
+    } else {
+        commands.spawn((body, transform, velocity));
+    }
+} */
 
 fn build_quadtree(
     mut commands: Commands,
@@ -289,31 +339,5 @@ fn draw_tree(
         if settings.show_tree {
             tree_res.tree.draw_tree(gizmos);
         }
-    }
-}
-
-fn spawn_body(
-    body: Body,
-    transform: Transform,
-    velocity: Velocity,
-    commands: &mut Commands,
-    materials: &mut Option<ResMut<Assets<ColorMaterial>>>,
-    meshes: &mut Option<ResMut<Assets<Mesh>>>,
-) {
-    // Spawn rendering materials only when available (to allow testing)
-    if let Some(meshes) = meshes {
-        if let Some(materials) = materials {
-            commands.spawn((
-                Mesh2d(meshes.add(Circle::new(body.radius))),
-                MeshMaterial2d(
-                    materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0))),
-                ),
-                body,
-                transform,
-                velocity,
-            ));
-        }
-    } else {
-        commands.spawn((body, transform, velocity));
     }
 }

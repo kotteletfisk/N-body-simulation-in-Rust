@@ -1,8 +1,8 @@
-
-
 #[cfg(test)]
 mod tests {
-    use crate::mass_to_hue;
+
+    use crate::*;
+    use test::Bencher;
 
     #[test]
     fn test_hue_conversion_1() {
@@ -16,5 +16,31 @@ mod tests {
     fn test_hue_conversion_10() {
         assert_eq!(mass_to_hue(2500.0, 0.0, 5000.0), 0.5);
     }
-    
+
+    #[bench]
+    fn test_frame_benchmarks(bencher: &mut Bencher) {
+        let mut app = App::new();
+
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(SimulationSettings::default());
+        app.add_message::<ResetMessage>();
+
+        app.add_systems(Startup, add_bodies);
+        app.add_systems(
+            Update,
+            (build_quadtree, compute_physics, update_positions).chain(),
+        );
+
+        app.update(); // run startup
+
+        bencher.iter(|| {
+            std::hint::black_box( app.update());
+        });
+    }
+
+    // bencher.iter(|| {
+    //     for _ in 0..100 {
+    //         app.update();
+    //     }
+    // });
 }
