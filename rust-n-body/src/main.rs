@@ -1,16 +1,19 @@
-pub(crate) mod bhtree;
-pub(crate) mod tests;
-pub(crate) mod bodies;
+#![feature(test)]
+extern crate test;
 
-use bodies::Body;
-use bevy::{ecs::entity::EntityIndex, prelude::*};
-use bevy_egui::{EguiPrimaryContextPass, EguiContexts, EguiPlugin, egui};
+pub(crate) mod bhtree;
+pub(crate) mod bodies;
+pub(crate) mod tests;
+
+use bevy::{ecs::entity::EntityIndex, gizmos, prelude::*};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bhtree::{Quad, Quadtree};
+use bodies::Body;
 use rand::Rng;
 use std::{collections::HashMap, ops::RangeInclusive};
 
-mod collision;  
-use collision::{collision};
+mod collision;
+use collision::collision;
 
 #[derive(Resource)]
 pub struct SimulationSettings {
@@ -45,7 +48,7 @@ impl Default for SimulationSettings {
             theta: 0.5,
             init_vel: 50.0,
             donut: false,
-            elasticity: 1.0, 
+            elasticity: 1.0,
             collision_enabled: false,
         }
     }
@@ -54,20 +57,37 @@ impl Default for SimulationSettings {
 #[derive(Component)]
 pub struct Velocity(Vec2);
 
+#[derive(Resource)]
+struct QuadtreeResource {
+    tree: Quadtree,
+}
+
 #[derive(Message)]
 struct ResetMessage;
 
-fn main() {
-    App::new()
-        .insert_resource(ClearColor(Color::BLACK))
+pub fn main() {
+    let app = App::new();
+    setup_app(app).run();
+}
+
+fn setup_app(mut app: App) -> App {
+    app.insert_resource(ClearColor(Color::BLACK))
         .insert_resource(SimulationSettings::default())
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
         .add_message::<ResetMessage>()
         .add_systems(EguiPrimaryContextPass, ui_window)
         .add_systems(Startup, (spawn_camera, add_bodies))
-        .add_systems(Update, (collision, reset_handler, update))
-        .run();
+        .add_systems(Update, (
+            collision,
+            reset_handler,
+            build_quadtree,
+            compute_physics.after(build_quadtree),
+            update_positions.after(compute_physics),
+            draw_tree.after(update_positions),
+        ));
+
+    app
 }
 
 fn ui_window(
@@ -83,7 +103,10 @@ fn ui_window(
             &mut settings.show_tree,
             "Draw Quadtree",
         ));
-        ui.add(egui::Checkbox::new(&mut settings.collision_enabled, "Enable Collision"));
+        ui.add(egui::Checkbox::new(
+            &mut settings.collision_enabled,
+            "Enable Collision",
+        ));
         ui.add(egui::Slider::new(&mut settings.elasticity, 0.0..=1.0).text("Elasticity"));
 
         ui.add(egui::Label::new("Reset Sim after tweaking these:"));
@@ -106,8 +129,8 @@ fn reset_handler(
     query: Query<Entity, With<Body>>,
     reset_event: MessageReader<ResetMessage>,
     mut commands: Commands,
-    materials: ResMut<Assets<ColorMaterial>>,
-    meshes: ResMut<Assets<Mesh>>,
+    materials: Option<ResMut<Assets<ColorMaterial>>>,
+    meshes: Option<ResMut<Assets<Mesh>>>,
     settings: Res<SimulationSettings>,
 ) {
     if reset_event.is_empty() {
@@ -147,8 +170,8 @@ pub fn mass_to_hue(m: f32, min_mass: f32, max_mass: f32) -> f32 {
 
 fn add_bodies(
     mut commands: Commands,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: Option<ResMut<Assets<ColorMaterial>>>,
+    mut meshes: Option<ResMut<Assets<Mesh>>>,
     settings: Res<SimulationSettings>,
 ) {
     let norm_min = if settings.min_body_mass < settings.max_body_mass {
@@ -180,15 +203,13 @@ fn add_bodies(
             transform = Transform::from_xyz(rng_vec.x, rng_vec.y, settings.z);
             let angle_vel = Vec2::from(dir.perp() * settings.init_vel);
             velocity = Velocity(angle_vel);
-        }
-        else{
+        } else {
             let x = rng.random_range(settings.spawn_area.clone());
             let y = rng.random_range(settings.spawn_area.clone());
-            
+
             transform = Transform::from_xyz(x, y, settings.z);
             velocity = Velocity(Vec2::ZERO);
         }
-
         spawn_body(
             body,
             transform,
@@ -200,14 +221,10 @@ fn add_bodies(
     }
 }
 
-fn update(
-    mut query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
-    settings: Res<SimulationSettings>,
-    gizmos: Gizmos,
+fn build_quadtree(
+    mut commands: Commands,
+    query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
 ) {
-    let mut accel_map: HashMap<EntityIndex, Vec2> = HashMap::new();
-    // let mut col_map: HashMap<u32, Vec3> = HashMap::new();
-
     let positions: Vec<Vec2> = query
         .iter()
         .map(|(_e, _b, t, _v)| Vec2::new(t.translation.x, t.translation.y))
@@ -218,16 +235,24 @@ fn update(
     let mut tree = Quadtree::new(quad);
 
     for (entity1, body1, transform1, _velocity1) in query.iter() {
-        tree.insert(entity1, Vec2::new(transform1.translation.x, transform1.translation.y), *body1);
+        tree.insert(
+            entity1,
+            Vec2::new(transform1.translation.x, transform1.translation.y),
+            *body1,
+        );
     }
 
-    if settings.show_tree {
-        tree.draw_tree(gizmos);
-    }
+    commands.insert_resource(QuadtreeResource { tree });
+}
 
-    for (entity1, body1, transform1, _velocity1) in query.iter_mut() {
+fn compute_physics(
+    mut query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
+    settings: Res<SimulationSettings>,
+    tree_res: Res<QuadtreeResource>,
+) {
+    for (entity1, body1, transform1, mut velocity1) in query.iter_mut() {
         let pos2d = Vec2::new(transform1.translation.x, transform1.translation.y);
-        let accel = tree.get_total_accel(
+        let accel = tree_res.tree.get_total_accel(
             entity1,
             pos2d,
             *body1,
@@ -235,15 +260,35 @@ fn update(
             settings.delta_t,
             settings.theta,
         );
-        accel_map.insert(entity1.index(), accel);
+        velocity1.0 += accel;
     }
+}
 
-    for (entity1, _body1, mut transform1, mut velocity) in query.iter_mut() {
+fn update_positions(
+    mut query: Query<(&mut Transform, &Velocity)>,
+    settings: Res<SimulationSettings>,
+) {
+    for (mut transform1, velocity) in query.iter_mut() {
         // velocity.0 += col_map.get(&entity1.index()).unwrap_or(&Vec3::ZERO);
-
-        velocity.0 += accel_map.get(&entity1.index()).unwrap();
+        // velocity.0 += accel_map.get(&entity1.index()).unwrap();
         transform1.translation.x += velocity.0.x * settings.delta_t;
         transform1.translation.y += velocity.0.y * settings.delta_t;
+    }
+}
+
+fn draw_tree(
+    settings: Res<SimulationSettings>,
+    tree_res: Res<QuadtreeResource>,
+    gizmos: Option<Gizmos>,
+) {
+    if !settings.show_tree {
+        return;
+    }
+
+    if let Some(gizmos) = gizmos {
+        if settings.show_tree {
+            tree_res.tree.draw_tree(gizmos);
+        }
     }
 }
 
@@ -252,15 +297,23 @@ fn spawn_body(
     transform: Transform,
     velocity: Velocity,
     commands: &mut Commands,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
-    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut Option<ResMut<Assets<ColorMaterial>>>,
+    meshes: &mut Option<ResMut<Assets<Mesh>>>,
 ) {
-    commands.spawn((
-        Mesh2d(meshes.add(Circle::new(body.radius))),
-        MeshMaterial2d(materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0)))),
-        body,
-        transform,
-        velocity,
-    ));
+    // Spawn rendering materials only when available (to allow testing)
+    if let Some(meshes) = meshes {
+        if let Some(materials) = materials {
+            commands.spawn((
+                Mesh2d(meshes.add(Circle::new(body.radius))),
+                MeshMaterial2d(
+                    materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0))),
+                ),
+                body,
+                transform,
+                velocity,
+            ));
+        }
+    } else {
+        commands.spawn((body, transform, velocity));
+    }
 }
-

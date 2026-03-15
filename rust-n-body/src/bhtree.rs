@@ -170,7 +170,7 @@ impl Quadtree {
                     }
                 }
             }
-        } // Borrow scope ends
+        } // Borrow scope ends, we can borrow self again
 
         if let Some(new_node) = new_node {
             let new_index = self.alloc_node(new_node);
