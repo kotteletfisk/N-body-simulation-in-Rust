@@ -245,32 +245,6 @@ fn draw_bodies(
     }
 }
 
-/* fn spawn_body(
-    body: Body,
-    transform: Transform,
-    velocity: Velocity,
-    commands: &mut Commands,
-    materials: &mut Option<ResMut<Assets<ColorMaterial>>>,
-    meshes: &mut Option<ResMut<Assets<Mesh>>>,
-) {
-    // Spawn rendering materials only when available (to allow testing)
-    if let Some(meshes) = meshes {
-        if let Some(materials) = materials {
-            commands.spawn((
-                Mesh2d(meshes.add(Circle::new(body.radius))),
-                MeshMaterial2d(
-                    materials.add(ColorMaterial::from_color(Srgba::rgb(body.hue, 0.5, 0.0))),
-                ),
-                body,
-                transform,
-                velocity,
-            ));
-        }
-    } else {
-        commands.spawn((body, transform, velocity));
-    }
-} */
-
 fn build_quadtree(
     mut commands: Commands,
     query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
