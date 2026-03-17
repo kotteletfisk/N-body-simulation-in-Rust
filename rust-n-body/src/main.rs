@@ -77,22 +77,14 @@ fn setup_app(mut app: App) -> App {
         .add_plugins(EguiPlugin::default())
         .add_message::<ResetMessage>()
         .add_systems(EguiPrimaryContextPass, ui_window)
-        .add_systems(
-            Startup,
-            (spawn_camera, add_bodies),
-        )
+        .add_systems(Startup, (spawn_camera, add_bodies))
         .add_systems(
             Update,
             (
                 collision,
                 reset_handler,
                 draw_bodies,
-                (
-                    build_quadtree,
-                    compute_physics,
-                    update_positions,
-                    draw_tree,
-                ).chain()
+                (build_quadtree, compute_physics, update_positions, draw_tree).chain(),
             ),
         );
 
@@ -245,23 +237,19 @@ fn draw_bodies(
     }
 }
 
-fn build_quadtree(
-    mut commands: Commands,
-    query: Query<(Entity, &Body, &Transform, &Velocity)>,
-) {
-    let positions: Vec<Vec2> = query
-        .iter()
-        .map(|(_e, _b, t, _v)| Vec2::new(t.translation.x, t.translation.y))
-        .collect();
-
-    let quad = Quad::new_containing(&positions);
+fn build_quadtree(mut commands: Commands, query: Query<(Entity, &Body, &Transform, &Velocity)>) {
+    // let positions: Vec<Vec2> = query
+    //     .iter()
+    //     .map(|(_e, _b, t, _v)| Vec2::new(t.translation.x, t.translation.y))
+    //     .collect();
+    let (center, size) = spanning_positions(query);
     // let quad = Quad::new(0.0, 0.0, 100000.0);
-    let mut tree = Quadtree::new(quad);
+    let mut tree = Quadtree::new(Quad::new(center, size));
 
     for (entity1, body1, transform1, _velocity1) in query.iter() {
         tree.insert(
             entity1,
-            Vec2::new(transform1.translation.x, transform1.translation.y),
+            transform1.translation.truncate(),
             *body1,
         );
     }
@@ -274,30 +262,49 @@ fn compute_physics(
     settings: Res<SimulationSettings>,
     tree_res: Res<QuadtreeResource>,
 ) {
-    for (entity1, body1, transform1, mut velocity1) in query.iter_mut() {
-        let pos2d = Vec2::new(transform1.translation.x, transform1.translation.y);
-        let accel = tree_res.tree.get_total_accel(
-            entity1,
-            pos2d,
-            *body1,
-            settings.g,
-            settings.delta_t,
-            settings.theta,
-        );
-        velocity1.0 += accel;
-    }
+    let tree = &tree_res.tree;
+    let g = settings.g;
+    let dt = settings.delta_t;
+    let theta = settings.theta;
+
+    query
+        .par_iter_mut()
+        .for_each(|(entity1, body1, transform1, mut velocity1)| {
+            let pos2d = Vec2::new(transform1.translation.x, transform1.translation.y);
+            let accel = tree.get_total_accel(entity1, pos2d, *body1, g, dt, theta);
+            velocity1.0 += accel;
+        });
+
+    // for (entity1, body1, transform1, mut velocity1) in query.iter_mut() {
+    //     let pos2d = Vec2::new(transform1.translation.x, transform1.translation.y);
+    //     let accel = tree_res.tree.get_total_accel(
+    //         entity1,
+    //         pos2d,
+    //         *body1,
+    //         settings.g,
+    //         settings.delta_t,
+    //         settings.theta,
+    //     );
+    //     velocity1.0 += accel;
+    // }
 }
 
 fn update_positions(
     mut query: Query<(&mut Transform, &Velocity)>,
     settings: Res<SimulationSettings>,
 ) {
-    for (mut transform1, velocity) in query.iter_mut() {
+    query.par_iter_mut().for_each(|(mut transform, velocity)| {
         // velocity.0 += col_map.get(&entity1.index()).unwrap_or(&Vec3::ZERO);
         // velocity.0 += accel_map.get(&entity1.index()).unwrap();
-        transform1.translation.x += velocity.0.x * settings.delta_t;
-        transform1.translation.y += velocity.0.y * settings.delta_t;
-    }
+        transform.translation.x += velocity.0.x * settings.delta_t;
+        transform.translation.y += velocity.0.y * settings.delta_t;
+    });
+    // for (mut transform1, velocity) in query.iter_mut() {
+    //     // velocity.0 += col_map.get(&entity1.index()).unwrap_or(&Vec3::ZERO);
+    //     // velocity.0 += accel_map.get(&entity1.index()).unwrap();
+    //     transform1.translation.x += velocity.0.x * settings.delta_t;
+    //     transform1.translation.y += velocity.0.y * settings.delta_t;
+    // }
 }
 
 fn draw_tree(
@@ -315,3 +322,20 @@ fn draw_tree(
         }
     }
 }
+
+    pub fn spanning_positions(query: Query<(Entity, &Body, &Transform, &Velocity), ()>) -> (Vec2, f32) {
+        let mut min = Vec2::splat(f32::MAX);
+        let mut max = Vec2::splat(f32::MIN);
+
+        for (_, _, transform, _) in query {
+            let pos = Vec2::new(transform.translation.x, transform.translation.y);
+
+            min = min.min(pos);
+            max = max.max(pos);
+        }
+
+        let center = (min + max) * 0.5;
+        let size = (max - min).max_element() + 1.0;
+
+        (center, size)
+    }

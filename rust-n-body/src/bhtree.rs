@@ -1,5 +1,5 @@
-use crate::Body;
-use bevy::prelude::*;
+use crate::{Body, Velocity};
+use bevy::{ecs::query::QueryIter, prelude::*};
 
 pub struct Quadtree {
     nodes: Vec<TreeNode>,
@@ -320,7 +320,7 @@ struct Subquad {
 impl Subquad {
     fn new(x: f32, y: f32, size: f32) -> Self {
         Subquad {
-            quad: Quad::new(x, y, size),
+            quad: Quad::new(Vec2 {x, y}, size),
             entity: Option::None,
             node_index: Option::None,
             mass: 0.0,
@@ -331,35 +331,16 @@ impl Subquad {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Quad {
-    center: Vec2,
-    size: f32,
+    pub(crate) center: Vec2,
+    pub(crate) size: f32,
 }
 
 impl Quad {
-    pub fn new(x: f32, y: f32, size: f32) -> Self {
+    pub fn new(center: Vec2, size: f32) -> Self {
         Quad {
-            center: Vec2::new(x, y),
+            center: center,
             size,
         }
-    }
-
-    pub fn new_containing(positions: &[Vec2]) -> Self {
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
-
-        for p in positions {
-            min_x = min_x.min(p.x);
-            min_y = min_y.min(p.y);
-            max_x = max_x.max(p.x);
-            max_y = max_y.max(p.y);
-        }
-
-        let center = Vec2::new(min_x + max_x, min_y + max_y) * 0.5;
-        let size = (max_x - min_x).max(max_y - min_y) + 1.0;
-
-        Self { center, size }
     }
 
     fn contains(&self, pos: Vec2) -> bool {
