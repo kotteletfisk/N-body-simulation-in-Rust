@@ -247,7 +247,7 @@ fn draw_bodies(
 
 fn build_quadtree(
     mut commands: Commands,
-    query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
+    query: Query<(Entity, &Body, &Transform, &Velocity)>,
 ) {
     let positions: Vec<Vec2> = query
         .iter()
@@ -270,7 +270,7 @@ fn build_quadtree(
 }
 
 fn compute_physics(
-    mut query: Query<(Entity, &mut Body, &mut Transform, &mut Velocity)>,
+    mut query: Query<(Entity, &Body, &Transform, &mut Velocity)>,
     settings: Res<SimulationSettings>,
     tree_res: Res<QuadtreeResource>,
 ) {
