@@ -261,7 +261,7 @@ fn build_quadtree(mut quadtree_resource: ResMut<QuadtreeResource>, query: Query<
             *body1,
         );
     }
-    println!("Node Allocs: {:?}", quadtree_resource.tree.n_node_allocs());
+    // println!("Node Allocs: {:?}", quadtree_resource.tree.n_node_allocs());
 }
 
 fn compute_physics(

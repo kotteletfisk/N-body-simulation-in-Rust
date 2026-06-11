@@ -25,7 +25,7 @@ mod tests {
         app.insert_resource(SimulationSettings::default());
         app.add_message::<ResetMessage>();
 
-        app.add_systems(Startup, add_bodies);
+        app.add_systems(Startup, (add_bodies, alloc_quadtree).chain());
         app.add_systems(
             Update,
             (build_quadtree, compute_physics, update_positions).chain(),
