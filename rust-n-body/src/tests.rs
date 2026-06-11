@@ -17,7 +17,7 @@ mod tests {
         assert_eq!(mass_to_hue(2500.0, 0.0, 5000.0), 0.5);
     }
 
-    #[bench]
+    #[bench] // Test frame cycle efficiency
     fn test_frame_benchmarks(bencher: &mut Bencher) {
         let mut app = App::new();
 

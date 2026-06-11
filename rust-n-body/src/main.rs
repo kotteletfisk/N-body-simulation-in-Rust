@@ -77,7 +77,7 @@ fn setup_app(mut app: App) -> App {
         .add_plugins(EguiPlugin::default())
         .add_message::<ResetMessage>()
         .add_systems(EguiPrimaryContextPass, ui_window)
-        .add_systems(Startup, (spawn_camera, add_bodies))
+        .add_systems(Startup, (spawn_camera, (add_bodies, alloc_quadtree).chain()))
         .add_systems(
             Update,
             (
@@ -237,24 +237,31 @@ fn draw_bodies(
     }
 }
 
-fn build_quadtree(mut commands: Commands, query: Query<(Entity, &Body, &Transform, &Velocity)>) {
-    // let positions: Vec<Vec2> = query
-    //     .iter()
-    //     .map(|(_e, _b, t, _v)| Vec2::new(t.translation.x, t.translation.y))
-    //     .collect();
+// first quadtree allocation
+fn alloc_quadtree(mut commands: Commands, query: Query<(Entity, &Body, &Transform, &Velocity)>) {
+
     let (center, size) = spanning_positions(query);
-    // let quad = Quad::new(0.0, 0.0, 100000.0);
-    let mut tree = Quadtree::new(Quad::new(center, size));
+    let tree = Quadtree::new(Quad::new(center, size));
+
+    commands.insert_resource(QuadtreeResource { tree });
+}
+
+fn build_quadtree(mut quadtree_resource: ResMut<QuadtreeResource>, query: Query<(Entity, &Body, &Transform, &Velocity)>) {
+
+    let (center, size) = spanning_positions(query);
+    let root_quad = Quad::new(center, size);
+
+    quadtree_resource.tree.begin_frame(root_quad);
+    
 
     for (entity1, body1, transform1, _velocity1) in query.iter() {
-        tree.insert(
+        quadtree_resource.tree.insert(
             entity1,
             transform1.translation.truncate(),
             *body1,
         );
     }
-
-    commands.insert_resource(QuadtreeResource { tree });
+    println!("Node Allocs: {:?}", quadtree_resource.tree.n_node_allocs());
 }
 
 fn compute_physics(

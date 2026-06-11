@@ -1,9 +1,11 @@
-use crate::{Body, Velocity};
-use bevy::{ecs::query::QueryIter, prelude::*};
+use crate::{Body};
+use bevy::{prelude::*};
 
 pub struct Quadtree {
     nodes: Vec<TreeNode>,
     root: usize,
+    next_free: usize,
+    node_allocs: u32,
 }
 
 impl Quadtree {
@@ -11,12 +13,40 @@ impl Quadtree {
         Quadtree {
             nodes: vec![TreeNode::new(quad)],
             root: 0,
+            next_free: 1,
+            node_allocs: 0,
         }
     }
 
-    fn alloc_node(&mut self, node: TreeNode) -> usize {
-        let index = self.nodes.len();
-        self.nodes.push(node);
+    pub fn begin_frame(&mut self, root_quad: Quad) {
+
+        self.root = 0;
+        self.next_free = 1;
+        self.nodes[self.root].reset(root_quad);
+        self.node_allocs = 0;
+    }
+
+    pub fn n_node_allocs(&mut self) -> u32 {
+        self.node_allocs
+    }
+
+    fn alloc_node(&mut self, quad: Quad) -> usize {
+
+        let index;
+        // if node already is allocated in vector, simply update its quad
+        if self.next_free < self.nodes.len() {
+
+            index = self.next_free;
+            self.nodes[index].reset(quad);
+        }
+        // else push a new node
+        else {
+
+            index = self.nodes.len();
+            self.nodes.push(TreeNode::new(quad));
+            self.node_allocs += 1;
+        }
+        self.next_free += 1;
         index
     }
 
@@ -86,7 +116,7 @@ impl Quadtree {
         body: Body,
     ) -> Option<(usize, Option<(Entity, Vec2, Body)>)> {
         let mut occupant = None;
-        let mut new_node = None;
+        let mut new_quad = None;
 
         // Borrow scope for self
         {
@@ -164,7 +194,7 @@ impl Quadtree {
                             subquad.pos_mass.x = x;
                             subquad.pos_mass.y = y;
 
-                            new_node = Some(TreeNode::new(subquad.quad));
+                            new_quad = Some(subquad.quad);
                             occupant = Some(tuple);
                         }
                     }
@@ -172,8 +202,8 @@ impl Quadtree {
             }
         } // Borrow scope ends, we can borrow self again
 
-        if let Some(new_node) = new_node {
-            let new_index = self.alloc_node(new_node);
+        if let Some(new_quad) = new_quad {
+            let new_index = self.alloc_node(new_quad);
 
             let node = &mut self.nodes[node_index];
             node.children[subquad_index].node_index = Some(new_index);
@@ -294,6 +324,9 @@ impl TreeNode {
                 Subquad::new(quad.center.x + q, quad.center.y - q, h),
             ],
         }
+    }
+    fn reset(&mut self, quad: Quad) {
+        *self = TreeNode::new(quad);
     }
 }
 
