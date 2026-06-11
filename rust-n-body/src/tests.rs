@@ -21,8 +21,12 @@ mod tests {
     fn test_frame_benchmarks(bencher: &mut Bencher) {
         let mut app = App::new();
 
+        let mut settings = SimulationSettings::default();
+        // amount of bodies to test with
+        settings.n_bodies = 20_000;
+
         app.add_plugins(MinimalPlugins);
-        app.insert_resource(SimulationSettings::default());
+        app.insert_resource(settings);
         app.add_message::<ResetMessage>();
 
         app.add_systems(Startup, (add_bodies, alloc_quadtree).chain());

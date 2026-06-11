@@ -299,7 +299,7 @@ impl Quadtree {
             );
         }
 
-        for node in &self.nodes {
+        for node in &self.nodes[..self.next_free] {
             draw_node(&node, &mut gizmos);
         }
     }
