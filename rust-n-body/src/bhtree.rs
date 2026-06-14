@@ -336,11 +336,24 @@ fn calc_accel(m2: f32, t1: Vec2, t2: Vec2, k: f32) -> Vec2 {
     let r = t2 - t1;
 
     let dist_sq = r.length_squared() + EPS2;
-    let inv_dist = dist_sq.sqrt().recip();
-    let inv_dist2 = inv_dist * inv_dist;
+    let inv_dist2 = dist_sq.recip();
 
     k * m2 * r * inv_dist2
 }
+
+fn calc_accel_newt(m2: f32, t1: Vec2, t2: Vec2, k: f32) -> Vec2 {
+    const EPS2: f32 = 5.0;
+
+    let r = t2 - t1;
+
+    let dist_sq = r.length_squared() + EPS2;
+    let inv_dist = dist_sq.sqrt().recip();
+    let inv_dist3 = inv_dist * inv_dist * inv_dist;
+
+    k * m2 * r * inv_dist3
+}
+
+
 
 struct Subquad {
     quad: Quad,
